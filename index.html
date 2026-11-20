@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Anonim chat</title>
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,Arial,sans-serif;background:#0f172a;color:#e2e8f0;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:16px}
+  #adminBtn{position:fixed;top:12px;left:12px;background:#1e293b;color:#e2e8f0;border:1px solid #334155;border-radius:8px;padding:8px 14px;cursor:pointer;font-size:14px;z-index:10}
+  #adminBtn:hover{background:#334155}
+  .card{background:#1e293b;border:1px solid #334155;border-radius:14px;padding:24px;width:100%;max-width:460px}
+  h2{margin:0 0 14px;font-size:20px}
+  textarea,input{width:100%;background:#0f172a;color:#e2e8f0;border:1px solid #334155;border-radius:8px;padding:10px;font-size:15px;font-family:inherit}
+  textarea{resize:vertical;min-height:110px}
+  button.main{margin-top:10px;width:100%;background:#3b82f6;color:#fff;border:0;border-radius:8px;padding:11px;font-size:15px;cursor:pointer}
+  button.main:hover{background:#2563eb}
+  .msg{background:#0f172a;border:1px solid #334155;border-radius:8px;padding:10px;margin-top:10px;word-break:break-word}
+  .msg small{display:block;color:#94a3b8;margin-top:6px;font-size:12px}
+  .msg button{float:right;background:none;border:0;color:#f87171;cursor:pointer;font-size:13px}
+  #status{margin-top:10px;font-size:14px;min-height:18px}
+  .hidden{display:none}
+  #modal{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;padding:16px;z-index:20}
+  #modal .card{max-width:320px}
+  #list{max-height:60vh;overflow:auto}
+</style>
+</head>
+<body>
+
+<button id="adminBtn">🔐 Admin</button>
+
+<!-- Oddiy foydalanuvchi oynasi -->
+<div class="card" id="userView">
+  <h2>💬 Xabar yozing</h2>
+  <textarea id="text" placeholder="Xabaringizni yozing..." maxlength="1000"></textarea>
+  <button class="main" id="sendBtn">Yuborish</button>
+  <div id="status"></div>
+</div>
+
+<!-- Admin oynasi -->
+<div class="card hidden" id="adminView">
+  <h2>📥 Xabarlar <span id="count" style="color:#94a3b8;font-weight:normal"></span></h2>
+  <div id="list"></div>
+  <button class="main" id="logoutBtn" style="background:#475569">Chiqish</button>
+</div>
+
+<!-- Parol oynasi (ism so'ralmaydi) -->
+<div id="modal" class="hidden">
+  <div class="card">
+    <h2>Admin paneli</h2>
+    <input type="password" id="pass" placeholder="Parol" autocomplete="current-password">
+    <button class="main" id="loginBtn">Kirish</button>
+    <button class="main" id="cancelBtn" style="background:#475569">Bekor qilish</button>
+    <div id="loginErr" style="color:#f87171;margin-top:8px;font-size:14px"></div>
+  </div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script>
+  // 1) Firebase konsolidan olingan sozlamalarni shu yerga qo'ying
+  const firebaseConfig = {
+    apiKey: "SIZNING_API_KEY",
+    authDomain: "SIZNING_PROJECT.firebaseapp.com",
+    projectId: "SIZNING_PROJECT",
+    appId: "SIZNING_APP_ID"
+  };
+  // Firebase Auth'da yaratiladigan admin email (parol: 16092010)
+  const ADMIN_EMAIL = "admin@chat.local";
+
+  firebase.initializeApp(firebaseConfig);
+  const auth = firebase.auth();
+  const db = firebase.firestore();
+  const $ = id => document.getElementById(id);
+  let unsub = null;
+
+  // ---- Foydalanuvchi xabar yuboradi ----
+  $('sendBtn').onclick = async () => {
+    const t = $('text').value.trim();
+    if (!t) return;
+    $('sendBtn').disabled = true;
+    try {
+      await db.collection('messages').add({
+        text: t,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+      $('text').value = '';
+      $('status').style.color = '#4ade80';
+      $('status').textContent = '✅ Yuborildi';
+    } catch (e) {
+      $('status').style.color = '#f87171';
+      $('status').textContent = '❌ Xatolik: ' + e.message;
+    }
+    $('sendBtn').disabled = false;
+    setTimeout(() => $('status').textContent = '', 3000);
+  };
+
+  // ---- Admin tugmasi / parol oynasi ----
+  $('adminBtn').onclick = () => {
+    if (auth.currentUser) return showAdmin();
+    $('modal').classList.remove('hidden');
+    $('pass').value = ''; $('loginErr').textContent = '';
+    $('pass').focus();
+  };
+  $('cancelBtn').onclick = () => $('modal').classList.add('hidden');
+  $('pass').addEventListener('keydown', e => { if (e.key === 'Enter') $('loginBtn').click(); });
+
+  $('loginBtn').onclick = async () => {
+    try {
+      await auth.signInWithEmailAndPassword(ADMIN_EMAIL, $('pass').value);
+      $('modal').classList.add('hidden');
+    } catch (e) {
+      $('loginErr').textContent = 'Parol noto\'g\'ri';
+    }
+  };
+
+  $('logoutBtn').onclick = () => auth.signOut();
+
+  auth.onAuthStateChanged(user => {
+    if (user) showAdmin(); else showUser();
+  });
+
+  function showAdmin() {
+    $('userView').classList.add('hidden');
+    $('adminView').classList.remove('hidden');
+    if (unsub) unsub();
+    unsub = db.collection('messages').orderBy('createdAt', 'desc').onSnapshot(snap => {
+      $('count').textContent = '(' + snap.size + ')';
+      $('list').innerHTML = '';
+      snap.forEach(doc => {
+        const d = doc.data();
+        const div = document.createElement('div');
+        div.className = 'msg';
+        const del = document.createElement('button');
+        del.textContent = '🗑 o\'chirish';
+        del.onclick = () => doc.ref.delete();
+        const p = document.createElement('div');
+        p.textContent = d.text;           // textContent — XSS'dan himoya
+        const s = document.createElement('small');
+        s.textContent = d.createdAt ? d.createdAt.toDate().toLocaleString() : '...';
+        div.append(del, p, s);
+        $('list').appendChild(div);
+      });
+    }, err => { $('list').textContent = 'Xatolik: ' + err.message; });
+  }
+
+  function showUser() {
+    if (unsub) { unsub(); unsub = null; }
+    $('adminView').classList.add('hidden');
+    $('userView').classList.remove('hidden');
+  }
+</script>
+</body>
+</html>
